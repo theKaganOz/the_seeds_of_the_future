@@ -1,0 +1,26 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="MeshLibrary" path="res://kit/LevelKit.tres" id="1"]
+[ext_resource type="Script" path="res://kit/demo_populate.gd" id="2"]
+
+[sub_resource type="Environment" id="Environment_1"]
+background_mode = 1
+background_color = Color(0.03, 0.03, 0.04, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.25, 0.24, 0.28, 1)
+ambient_light_energy = 0.6
+
+[node name="KitDemo" type="Node3D"]
+script = ExtResource("2")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_1")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.8, -0.4, 0.4, 0, 0.7, 0.7, -0.55, -0.55, 0.55, 0, 10, 0)
+light_energy = 1.1
+shadow_enabled = true
+
+[node name="GridMap" type="GridMap" parent="."]
+mesh_library = ExtResource("1")
+cell_size = Vector3(4, 4, 4)
