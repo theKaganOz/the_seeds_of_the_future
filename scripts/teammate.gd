@@ -179,7 +179,13 @@ func _engage(target: Node3D) -> void:
 		can_attack = false
 		attack_timer.start()
 		if target.has_method("take_damage"):
-			target.take_damage(ATTACK_DAMAGE, self)
+			# Fresh raycast toward the actual chosen target -- _find_target's
+			# scan loop may have left attack_ray pointing at a different
+			# candidate it checked last, not necessarily this one.
+			var headshot := false
+			if _has_line_of_sight(target) and target.has_method("is_headshot_at"):
+				headshot = target.is_headshot_at(attack_ray.get_collision_point())
+			target.take_damage(ATTACK_DAMAGE, self, headshot)
 
 func _follow(target: Node3D) -> void:
 	var to_target: Vector3 = target.global_position - global_position
@@ -196,8 +202,21 @@ func _follow(target: Node3D) -> void:
 		velocity.x = move_toward(velocity.x, 0, SPEED)
 		velocity.z = move_toward(velocity.z, 0, SPEED)
 
-func take_damage(amount: int, attacker: Node3D = null) -> void:
+func is_headshot_at(hit_point: Vector3) -> bool:
+	# Fixed 1.8 capsule (no crouch for teammates), centered at
+	# global_position as CollisionShape3D's default position -- spans
+	# roughly -0.9..+0.9.
+	return (hit_point.y - global_position.y) > 0.5
+
+func take_damage(amount: int, attacker: Node3D = null, headshot: bool = false) -> void:
 	if is_down:
+		return
+	if headshot:
+		# HEV-style helmet absorbs the lethal portion -- forces
+		# incapacitation regardless of remaining health, but doesn't kill
+		# outright, per the locked no-permadeath design.
+		health = 0
+		_go_down()
 		return
 	health = max(0, health - amount)
 	if health == 0:

@@ -1,10 +1,11 @@
 extends SceneTree
 
-# Run: godot --headless --path . --script scripts/test_compliance.gd
-# (project must have been opened/scanned once already so global class_name
-# registration exists — see .godot/global_script_class_cache.cfg)
+# Run: godot --headless --path . --script scripts/tests/test_compliance.gd
 # Asserts the actual numeric behavior of the compliance model against every
 # design decision we've locked, not just that the code executes.
+
+const CharacterState := preload("res://scripts/character_state.gd")
+const ComplianceEngine := preload("res://scripts/compliance_engine.gd")
 
 func _initialize() -> void:
 	var failures := 0

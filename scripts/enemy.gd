@@ -1,11 +1,17 @@
 extends CharacterBody3D
 
 const SPEED := 3.2
-const MAX_HEALTH := 60
+const MAX_HEALTH := 120
 const ATTACK_RANGE := 1.6
 const ATTACK_DAMAGE := 12
 const ATTACK_COOLDOWN := 1.1
 const SIGHT_RANGE := 22.0
+const HEADSHOT_CHANCE := 0.2
+
+# Local Y offset above global_position that counts as a headshot. Capsule
+# height 1.9 (see mesh setup below) spans roughly -0.95..+0.95 relative to
+# global_position, so 0.55 captures the top ~20% of total body height.
+const HEAD_ZONE_Y := 0.55
 
 var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity", 18.0)
 var health := MAX_HEALTH
@@ -65,12 +71,22 @@ func _attack() -> void:
 	can_attack = false
 	attack_timer.start()
 	if aggro_target.has_method("take_damage"):
-		aggro_target.take_damage(ATTACK_DAMAGE)
+		var headshot := randf() < HEADSHOT_CHANCE
+		aggro_target.take_damage(ATTACK_DAMAGE, self, headshot)
 
-func take_damage(amount: int, attacker: Node3D = null) -> void:
-	health -= amount
+func is_headshot_at(hit_point: Vector3) -> bool:
+	return (hit_point.y - global_position.y) > HEAD_ZONE_Y
+
+func take_damage(amount: int, attacker: Node3D = null, headshot: bool = false) -> void:
 	if attacker and is_instance_valid(attacker):
 		aggro_target = attacker
+	if headshot:
+		# No helmet protection for this faction -- unlike the squad's HEV
+		# gear, a headshot here is simply lethal, regardless of remaining
+		# health.
+		queue_free()
+		return
+	health -= amount
 	mesh.material_override.albedo_color = Color(1, 0.4, 0.4)
 	get_tree().create_timer(0.08).timeout.connect(func():
 		if is_instance_valid(self):

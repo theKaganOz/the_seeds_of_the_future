@@ -133,15 +133,30 @@ func _fire() -> void:
 	if muzzle_ray.is_colliding():
 		var target := muzzle_ray.get_collider()
 		if target and target.has_method("take_damage"):
-			target.take_damage(SHOOT_DAMAGE, self)
+			var headshot := false
+			if target.has_method("is_headshot_at"):
+				headshot = target.is_headshot_at(muzzle_ray.get_collision_point())
+			target.take_damage(SHOOT_DAMAGE, self, headshot)
 
-func take_damage(amount: int) -> void:
+func take_damage(amount: int, attacker: Node3D = null, headshot: bool = false) -> void:
 	if is_down:
+		return
+	if headshot:
+		# HEV-style helmet absorbs the lethal portion -- forces
+		# incapacitation regardless of remaining health, but doesn't kill
+		# outright, per the locked no-permadeath design.
+		health = 0
+		_go_down()
 		return
 	health = max(0, health - amount)
 	_update_hud()
 	if health == 0:
 		_go_down()
+
+func is_headshot_at(hit_point: Vector3) -> bool:
+	var capsule := collision_shape.shape as CapsuleShape3D
+	var center_y := global_position.y + collision_shape.position.y
+	return (hit_point.y - center_y) > (capsule.height / 2.0) * 0.55
 
 func _go_down() -> void:
 	is_down = true
