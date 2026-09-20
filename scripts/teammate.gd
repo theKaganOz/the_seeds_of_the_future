@@ -14,11 +14,13 @@ const STOP_DISTANCE := 2.0
 const ENGAGE_RANGE := 15.0
 const ATTACK_DAMAGE := 20
 const ATTACK_COOLDOWN := 0.8
+const MAX_HEALTH := 80
 
 var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity", 18.0)
 var player: Node3D
 var can_attack := true
 var current_target: Node3D = null
+var health := MAX_HEALTH
 
 # Present now so future systems (compliance-driven commands, revive,
 # morale) read from real per-teammate state instead of being retrofitted.
@@ -95,11 +97,11 @@ func _engage(target: Node3D) -> void:
 	velocity.z = move_toward(velocity.z, 0, SPEED)
 	look_at_from_position(global_position, Vector3(target.global_position.x, global_position.y, target.global_position.z), Vector3.UP)
 
-	if can_attack:
+	if can_attack and SquadInventory.try_consume(1):
 		can_attack = false
 		attack_timer.start()
 		if target.has_method("take_damage"):
-			target.take_damage(ATTACK_DAMAGE)
+			target.take_damage(ATTACK_DAMAGE, self)
 
 func _follow(target: Node3D) -> void:
 	var to_target: Vector3 = target.global_position - global_position
@@ -115,3 +117,16 @@ func _follow(target: Node3D) -> void:
 	elif dist < STOP_DISTANCE:
 		velocity.x = move_toward(velocity.x, 0, SPEED)
 		velocity.z = move_toward(velocity.z, 0, SPEED)
+
+# Health tracking only -- NOT incapacitation. The locked design calls for
+# no permanent death, teammates go down and are revivable, with all-four-
+# down triggering a level restart. That whole system doesn't exist yet;
+# this just stops health going negative and gives a visible hit reaction
+# so enemy aggro switching to the teammate isn't a dead-end interaction.
+func take_damage(amount: int, attacker: Node3D = null) -> void:
+	health = max(0, health - amount)
+	mesh.material_override.albedo_color = Color(0.6, 0.65, 0.95)
+	get_tree().create_timer(0.08).timeout.connect(func():
+		if is_instance_valid(self):
+			mesh.material_override.albedo_color = Color(0.2, 0.45, 0.75)
+	)

@@ -102,6 +102,8 @@ func _update_crouch(delta: float) -> void:
 	ceiling_check.position.y = capsule.height + collision_shape.position.y
 
 func _fire() -> void:
+	if not SquadInventory.try_consume(1):
+		return
 	can_shoot = false
 	shoot_timer.start()
 
@@ -109,7 +111,7 @@ func _fire() -> void:
 	if muzzle_ray.is_colliding():
 		var target := muzzle_ray.get_collider()
 		if target and target.has_method("take_damage"):
-			target.take_damage(SHOOT_DAMAGE)
+			target.take_damage(SHOOT_DAMAGE, self)
 
 func take_damage(amount: int) -> void:
 	health = max(0, health - amount)

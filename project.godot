@@ -9,6 +9,10 @@ config/name="DoomPrototype"
 run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.2", "Forward Plus")
 
+[autoload]
+
+SquadInventory="*res://scripts/squad_inventory.gd"
+
 [input]
 
 move_forward={
