@@ -6,6 +6,8 @@ extends CharacterBody3D
 # and combat-sharing exist, this node needs new *behavior*, not a new data
 # model bolted on afterward.
 
+const CharacterStateScript := preload("res://scripts/character_state.gd")
+
 const SPEED := 5.0
 const FOLLOW_DISTANCE := 4.0
 const STOP_DISTANCE := 2.0
@@ -15,7 +17,7 @@ var player: Node3D
 
 # Present now so future systems (compliance-driven commands, revive,
 # morale) read from real per-teammate state instead of being retrofitted.
-var state := CharacterState.new()
+var state = CharacterStateScript.new()
 
 @onready var mesh: MeshInstance3D = $MeshInstance3D
 

@@ -1,5 +1,7 @@
 class_name ComplianceEngine
 
+const CharacterStateScript := preload("res://scripts/character_state.gd")
+
 ## Pure, stateless compliance logic — every function here takes state in and
 ## returns a value out, with no node/scene dependency, which is what makes
 ## it testable headless without any level, player, or squad actually
@@ -17,7 +19,7 @@ const REVIVE_PRIORITY := 1.2  # flat boost for revive — top priority, not abso
 ## target_id: who the command concerns, if anyone (a revive target, or who
 ## an "aggressive"/"defend" order is meant to protect/engage near).
 static func compliance_probability(
-	state: CharacterState,
+	state: CharacterStateScript,
 	command_risk: float,
 	target_id: String = "",
 	is_revive: bool = false
@@ -35,7 +37,7 @@ static func compliance_probability(
 	return _sigmoid(x)
 
 static func roll_compliance(
-	state: CharacterState,
+	state: CharacterStateScript,
 	command_risk: float,
 	target_id: String = "",
 	is_revive: bool = false
