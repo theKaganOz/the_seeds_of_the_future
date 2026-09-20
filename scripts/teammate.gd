@@ -1,12 +1,16 @@
 extends CharacterBody3D
 
-# First squad teammate. For now this implements only the locked baseline
-# behavior: autonomous follow, no command response yet (the typed-command
-# parser doesn't exist). It carries a CharacterState so that when commands
-# and combat-sharing exist, this node needs new *behavior*, not a new data
-# model bolted on afterward.
+# First squad teammate. Autonomous follow/engage baseline, plus a real
+# incapacitation/revive loop: reviving the DOWNED PLAYER is an AI decision
+# that runs through the actual ComplianceEngine (scarcity derived from the
+# live shared ammo pool, morale a static default -- no morale arc exists
+# yet since that's a narrative-driven system, not built). Reviving a downed
+# TEAMMATE is the player's own direct action (see player.gd's "revive"
+# input), not a compliance decision, matching the locked design: compliance
+# governs AI willingness, not the player's own choices.
 
 const CharacterStateScript := preload("res://scripts/character_state.gd")
+const ComplianceEngineScript := preload("res://scripts/compliance_engine.gd")
 
 const SPEED := 5.0
 const FOLLOW_DISTANCE := 4.0
@@ -16,19 +20,32 @@ const ATTACK_DAMAGE := 20
 const ATTACK_COOLDOWN := 0.8
 const MAX_HEALTH := 80
 
+# Revive AI tuning. These are defaults I'm choosing now, not values we've
+# explicitly locked -- flag if they should be different once you've felt
+# them in play.
+const REVIVE_RANGE := 2.5
+const REVIVE_CHANNEL_TIME := 1.5
+const REVIVE_HEAL := 60
+const REVIVE_RECONSIDER_INTERVAL := 2.0
+
 var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity", 18.0)
 var player: Node3D
 var can_attack := true
 var current_target: Node3D = null
 var health := MAX_HEALTH
+var is_down := false
 
-# Present now so future systems (compliance-driven commands, revive,
-# morale) read from real per-teammate state instead of being retrofitted.
+var committed_to_revive := false
+var revive_channel_progress := 0.0
+
+# Present now so future systems (compliance-driven commands, morale arc)
+# read from real per-teammate state instead of being retrofitted.
 var state = CharacterStateScript.new()
 
 @onready var mesh: MeshInstance3D = $MeshInstance3D
 @onready var attack_timer: Timer = $AttackCooldown
 @onready var attack_ray: RayCast3D = $AttackRay
+@onready var revive_decision_timer: Timer = $ReviveDecisionTimer
 
 func _ready() -> void:
 	add_to_group("teammate")
@@ -38,6 +55,10 @@ func _ready() -> void:
 	attack_timer.wait_time = ATTACK_COOLDOWN
 	attack_timer.one_shot = true
 	attack_timer.timeout.connect(func(): can_attack = true)
+
+	revive_decision_timer.wait_time = REVIVE_RECONSIDER_INTERVAL
+	revive_decision_timer.timeout.connect(_consider_revive)
+	revive_decision_timer.start()
 
 	var capsule := CapsuleMesh.new()
 	capsule.radius = 0.4
@@ -55,6 +76,21 @@ func _physics_process(delta: float) -> void:
 	if not is_on_floor():
 		velocity.y -= gravity * delta
 
+	if is_down:
+		velocity.x = move_toward(velocity.x, 0, SPEED)
+		velocity.z = move_toward(velocity.z, 0, SPEED)
+		move_and_slide()
+		return
+
+	if committed_to_revive and player and is_instance_valid(player) and player.get("is_down"):
+		_pursue_revive(delta)
+		move_and_slide()
+		return
+	elif committed_to_revive:
+		# Player got revived by other means, or is gone -- stand down.
+		committed_to_revive = false
+		revive_channel_progress = 0.0
+
 	current_target = _find_target()
 
 	if current_target:
@@ -66,6 +102,48 @@ func _physics_process(delta: float) -> void:
 		velocity.z = move_toward(velocity.z, 0, SPEED)
 
 	move_and_slide()
+
+func _pursue_revive(delta: float) -> void:
+	var to_player: Vector3 = player.global_position - global_position
+	to_player.y = 0
+	var dist := to_player.length()
+
+	if dist > REVIVE_RANGE:
+		var dir := to_player.normalized()
+		velocity.x = dir.x * SPEED
+		velocity.z = dir.z * SPEED
+		if dir.length() > 0.01:
+			look_at_from_position(global_position, global_position + dir, Vector3.UP)
+		revive_channel_progress = 0.0
+	else:
+		velocity.x = move_toward(velocity.x, 0, SPEED)
+		velocity.z = move_toward(velocity.z, 0, SPEED)
+		revive_channel_progress += delta
+		if revive_channel_progress >= REVIVE_CHANNEL_TIME:
+			player.revive()
+			committed_to_revive = false
+			revive_channel_progress = 0.0
+
+# Reconsideration: reused ComplianceEngine, is_revive=true, exactly the
+# same machinery combat commands use. Scarcity is derived from the live
+# shared ammo pool rather than a dummy value -- this is a real reading of
+# actual game state, not a stub.
+func _consider_revive() -> void:
+	if is_down or committed_to_revive:
+		return
+	if not player or not is_instance_valid(player) or not player.get("is_down"):
+		return
+
+	state.scarcity = 1.0 - (float(SquadInventory.ammo) / float(SquadInventory.MAX_AMMO))
+
+	var danger := 0.0
+	for enemy in get_tree().get_nodes_in_group("enemy"):
+		if is_instance_valid(enemy):
+			danger = 0.8
+			break
+
+	if ComplianceEngineScript.roll_compliance(state, danger, "player", true):
+		committed_to_revive = true
 
 func _find_target() -> Node3D:
 	var best: Node3D = null
@@ -118,15 +196,25 @@ func _follow(target: Node3D) -> void:
 		velocity.x = move_toward(velocity.x, 0, SPEED)
 		velocity.z = move_toward(velocity.z, 0, SPEED)
 
-# Health tracking only -- NOT incapacitation. The locked design calls for
-# no permanent death, teammates go down and are revivable, with all-four-
-# down triggering a level restart. That whole system doesn't exist yet;
-# this just stops health going negative and gives a visible hit reaction
-# so enemy aggro switching to the teammate isn't a dead-end interaction.
 func take_damage(amount: int, attacker: Node3D = null) -> void:
+	if is_down:
+		return
 	health = max(0, health - amount)
+	if health == 0:
+		_go_down()
+		return
 	mesh.material_override.albedo_color = Color(0.6, 0.65, 0.95)
 	get_tree().create_timer(0.08).timeout.connect(func():
-		if is_instance_valid(self):
+		if is_instance_valid(self) and not is_down:
 			mesh.material_override.albedo_color = Color(0.2, 0.45, 0.75)
 	)
+
+func _go_down() -> void:
+	is_down = true
+	committed_to_revive = false
+	mesh.material_override.albedo_color = Color(0.25, 0.25, 0.3)
+
+func revive() -> void:
+	is_down = false
+	health = REVIVE_HEAL
+	mesh.material_override.albedo_color = Color(0.2, 0.45, 0.75)

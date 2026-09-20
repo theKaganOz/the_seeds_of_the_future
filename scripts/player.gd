@@ -17,10 +17,18 @@ const STAND_CAM_Y := 0.7
 const CROUCH_CAM_Y := 0.25
 const CROUCH_LERP_SPEED := 10.0
 
+# Incapacitation/revive. REVIVE_RANGE and REVIVE_HEAL are defaults I'm
+# choosing now, not values we've explicitly locked -- flag if they should
+# be different once you've felt them in play.
+const REVIVE_RANGE := 2.5
+const REVIVE_HEAL := 60
+
 var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity", 18.0)
 var health := MAX_HEALTH
 var can_shoot := true
 var is_crouching := false
+var is_down := false
+var teammate: Node3D
 
 @onready var camera: Camera3D = $Camera3D
 @onready var muzzle_ray: RayCast3D = $Camera3D/MuzzleRay
@@ -36,6 +44,10 @@ func _ready() -> void:
 	shoot_timer.timeout.connect(func(): can_shoot = true)
 	collision_shape.shape = collision_shape.shape.duplicate()
 	call_deferred("_update_hud")
+	call_deferred("_find_teammate")
+
+func _find_teammate() -> void:
+	teammate = get_tree().get_first_node_in_group("teammate")
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
@@ -46,12 +58,22 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
-	if event.is_action_pressed("shoot") and can_shoot:
+	if event.is_action_pressed("shoot") and can_shoot and not is_down:
 		_fire()
+
+	if event.is_action_pressed("revive") and not is_down:
+		_try_revive_teammate()
 
 func _physics_process(delta: float) -> void:
 	if not is_on_floor():
 		velocity.y -= gravity * delta
+
+	if is_down:
+		velocity.x = move_toward(velocity.x, 0, RUN_SPEED)
+		velocity.z = move_toward(velocity.z, 0, RUN_SPEED)
+		move_and_slide()
+		_check_all_down()
+		return
 
 	if Input.is_action_just_pressed("jump") and is_on_floor() and not is_crouching:
 		velocity.y = JUMP_VELOCITY
@@ -114,15 +136,42 @@ func _fire() -> void:
 			target.take_damage(SHOOT_DAMAGE, self)
 
 func take_damage(amount: int) -> void:
+	if is_down:
+		return
 	health = max(0, health - amount)
 	_update_hud()
 	if health == 0:
-		_die()
+		_go_down()
+
+func _go_down() -> void:
+	is_down = true
+	print("Player is down. Needs a revive.")
+	_update_hud()
+
+func revive() -> void:
+	is_down = false
+	health = REVIVE_HEAL
+	print("Player revived.")
+	_update_hud()
+
+func _try_revive_teammate() -> void:
+	if not teammate or not is_instance_valid(teammate):
+		return
+	if not teammate.get("is_down"):
+		return
+	if global_position.distance_to(teammate.global_position) > REVIVE_RANGE:
+		return
+	teammate.revive()
+
+func _check_all_down() -> void:
+	if not teammate or not is_instance_valid(teammate):
+		return
+	if is_down and teammate.get("is_down"):
+		print("Whole squad down. Restarting level.")
+		get_tree().reload_current_scene()
 
 func _update_hud() -> void:
 	if hud and hud.has_method("set_health"):
 		hud.set_health(health)
-
-func _die() -> void:
-	print("Player died. Reload level.")
-	get_tree().reload_current_scene()
+	if hud and hud.has_method("set_down_status"):
+		hud.set_down_status(is_down)
